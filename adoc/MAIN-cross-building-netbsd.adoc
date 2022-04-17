@@ -1,0 +1,567 @@
+[[netbsd.cross-build]]
+= 交叉编译 NetBSD
+不开花（翻译）
+韩鹏飞（整理）<pengphei@qq.com>
+:Revision: 0
+:toc:
+:icons: font
+:numbered:
+:lang: zh-CN
+:website: https://www.netbsd.org/docs/internals/en/index.html
+:imagesdir: images/cross-building
+
+ifdef::env-github[]
+//Admonitions
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[[netbsd.internals.purpose]]
+//[abstract]
+== 概述
+
+NetBSD 有个基础框架，它可以交叉编译包含可引导的分发媒介的整个 NetBSD 套件。编译过程不需要 root 权限或是可写的源码目录。编译过程可在多数 POSIX 兼容的操作系统上进行。本文解释了为了进行这个过程而对 NetBSD 所做的修改，列举了这项工作的优势，并介绍了未来为 NetBSD 交叉编译任何软件的工作。
+
+== 介绍
+
+NetBSD<<ref-netbsd>> 是移植性最好的通用 Unix 操作系统。它可自由使用和再发行，并可广泛的运行在从现代桌面系统到可在不到一小时内编译整个发行套件的高端服务器，再到嵌入式系统和需要几天才能编译整个发行套件的旧机器。
+
+在 2001 年下半年，开始了改进 NetBSD 能力以使可以交叉编译 NetBSD 的工作，特别是交叉编译整个套件。这个系统称为 _“build.sh”_，因为这是所用脚本的名字，它是这个框架的可视前端。
+
+NetBSD 1.6 是第一个由 build.sh 制作的版本，NetBSD 项目的版本引擎组利用它在 NetBSD 1.6 的发行周期内为 39 个平台交叉编译发行套件。以前的版本发行要求发行工程师访问每个平台，或是和某个硬件上的开发者配合。然而那种方法对于适度数量的平台（ NetBSD 1.5发布了 20 种平台的二进制版本）还行，并不具有扩展性，特别是随着 NetBSD 支持的平台数增长时（2003 年 6 月为 54 个）。
+
+== 背景
+
+=== NetBSD
+
+自从 NetBSD 项目于 1993 年开始以来，就有可移植到众多目标平台的目标。在设计，实现和改进方面做了一些有效的努力以使 NetBSD 容易“移植”到新的平台<<ref-porting-amd64>>。设备驱动程序以一种允许在各平台间简单共享而不需代码重组<<ref-dma>>的方式写成。
+
+当在与目标平台不同的主机上，确切的说是本地系统上，编译系统时，NetBSD 源代码的可移植性并不意味着“放心使用”。
+
+在 `build.sh` 之前，某个平台的 NetBSD 发行版本是由某个和目标版本号“接近”版本的操作系统上“本地”编译的。这会有异常，这个交替过程不易于使用，也不易于自动化，并且带来各种 `build.sh` 已处理了的限制条件。
+
+`build.sh` 提供了在没有处理过的其它开源操作系统上编译 NetBSD 的通用性。
+
+=== 交叉编译 Unix
+
+Unix 最初是交叉编译而来，直到当本地主系统可用时，那变为主要的开发方法并持续至今。
+
+交叉编译是在 “host” 系统上运行程序来为不同的 “target” 系统产生目标代码。对于系统制作者来说这不是个简单任务并且通常不能整合进由开源操作系统所使用的操作系统编译过程（译者注:我鸟语太烂，没理解这一句，大概是说你所用操作系统并没默认安装交叉编译器，需要自己制作）。
+
+可自由使用的软件项目，例如  **GCC<<ref-gcc>>** 支持交叉编译很长时间了，并且 GCC 是 NetBSD 所用的 GNU工具链 的一部分，并且主要依赖于交叉编译。
+
+==== 交叉编译的介绍<<ref-trans-1>>
+
+一个完整的交叉编译器环境有好几个部分。除了编译器本身外，还需要许多别的工具和文件来创建功能程序。通常编译器所需要的的所有东西都要有。对于GNU工具链，这包括:
+
+* 编译器－gcc
+* 汇编器－as
+* 链接器－ld
+* _“binutils”_ ；size,nm,strip,ar,等等。
+* 头文件（由NetBSD提供）
+* 库（由NetBSD和GNU工具链提供）。
+
+如下是个这些都如何工作的快速预览。这对于任何编译器都是一样的；这个示例里的详细信息来自于 GCC。
+
+. 在源码文件上，通常是“.c”文件，C编译器前端 gcc 调用C预处理器 cpp，产生“.i”文件。这仍是有效的 C 代码，但是将没有 C 预处理器指示（实际上，在现代 GCC，cpp 这一遍包含在 cc1 这一遍里来加快这个过程同时提供更快的错误报告。这个过程对于用户是不可视的）。
+. 对于 cpp 的输出，gcc 调用后端 cc1，产生“.s”文件。这是相应于输入的C源文件的汇编源码文件。
+. 对于 cc1 的输出，gcc 调用汇编器 as，产生“.o”文件。这是相应于汇编文件的目标文件。
+. 对于 as 的输出，gcc 调用链接器 ld，加上其它文件（有时共同称为“crt材料”），产生可执行文件。除了可执行文件，文档和共享库也被编译。文档库通常由 ar 从目标文件创建。共享库是由 gcc 使用 -shared 选项来创建的，这会调用 ld 使用各种参数来创建共享库。
+
+gcc 的 -v 标识用来查看确切的调用了那些外在的程序。例如，在 NetBSD/macppc 盒子上交叉编译一个简单的 NetBSD/sparc “hello,world” C 程序: 
+
+----
+what-time-is-love ~> /tools/bin/sparc--netbsde lf-gcc -I/dest/usr/include -L/dest/usr/lib -B/ dest/usr/lib/ -v -save-temps -o hello.x hello. c
+
+Reading specs from /tools/lib/gcc-lib/sparc--n etbsdelf/2.95.3/specs gcc version 2.95.3 20010315 (release) (NetBSD nb4) /tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/cp p0 -lang-c -v -I/dest/usr/include -isystem /de st/usr/lib/include -D__GNUC__=2 -D__GNUC_MINOR __=95 -D__sparc__ -D__NetBSD__ -D__ELF__ -D__s parc__ -D__NetBSD__ -D__ELF__ -Asystem(unix) - Asystem(NetBSD) -D__GCC_NEW_VARARGS__ -Acpu(sp arc) -Amachine(sparc) -D__sparc hello.c hello. i
+
+GNU CPP version 2.95.3 20010315 (release)
+
+(Net BSD nb4) (sparc-netbsdelf) #include "..." search starts here: #include <...> search starts here:
+
+Following is a quick overview of how it all works. This /dest/usr/include
+
+is basically the same for any compiler; in this example /tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/in clude
+
+/tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/.. /../../../sparc--netbsdelf/include
+
+/tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/.. /../../../include/g++-3 /tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/..
+
+is done inside the cc1 pass to speed up the process /../../../sparc--netbsdelf/sys-include
+
+/tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/cc 1 hello.i -quiet -dumpbase hello.c -version -o hello.s GNU C version 2.95.3 20010315 (release) (NetBS D nb4) (sparc-netbsdelf) compiled by GNU C ver sion 2.95.3 20010315 (release) (NetBSD nb4).
+
+/tools/sparc--netbsdelf/bin/as -32 -o hello.o
+
+hello.s /tools/lib/gcc-lib/sparc--netbsdelf/2.95.3/co
+
+llect2 -m elf32_sparc -dy -dc -dp -e __start -
+
+dynamic-linker /usr/libexec/ld.elf_so -o hello .x /dest/usr/lib/crt0.o /dest/usr/lib/crti.o /
+
+dest/usr/lib/crtbegin.o -L/dest/usr/lib -L/des t/usr/lib -L/tools/lib/gcc-lib/sparc--netbsdel f/2.95.3 -L/tools/sparc--netbsdelf/lib hello.o -lgcc -lc -lgcc /dest/usr/lib/crtend.o /dest/ usr/lib/crtn.o
+----
+
+输出显示成功调用了 cpp0, cc1, as 和 ld 程序。创建了一个目标文件并且各种 crt 材料加到了最终的 ld 行。
+
+如果 `gcc` 给输出传递了 `-save-temps` 选项，每个程序在处理完后的都不会被删除。在上面的例子里，创建了如下的文件:
+
+----
+what-time-is-love ~> ls -l hello.?
+
+-rw-rw-r-- 1 mrg mrg 57 Jun 5 2001 hello.c
+-rw-rw-r-- 1 mrg mrg 7820 Jul 7 15:01 hello.i
+-rw-r--r-- 1 mrg mrg 872 Jul 7 15:01 hello.o
+-rw-rw-r-- 1 mrg mrg 408 Jul 7 15:01 hello.s
+-rwxr-xr-x 1 mrg mrg 68638 Jul 7 15:01 hello.x
+----
+
+这是于源文件以及 cpp,cc1,as 和 ld 各自的输出。
+
+对于一个交叉编译器，汇编器，链接器和 binutils（二进制实用程序）应当也是“交叉”工具。对于 GNU 工具链，这些通常称为 `“$target-$tool”` 。例如，powerpc-eabi-ld 是针对 powerpc-eabi 目标的。
+
+每个交叉编译器环境都需要提供适合于相应目标平台的头文件和库。这也许提供一个静态的文件集或是编译过程产生用以自举的它们。对于头文件和从源码编译库，NetBSD 是用了这两种技术。
+
+==== 目标系统，主系统和编译主系统
+
+交叉编译器的 _“target”_，_“host”_ 和 _“build host”_ 各个部分的区别是经常令人迷惑的。它们是:
+
+[cols="2*"]
+|===
+|target(目标系统）
+|为其创建工具链的平台
+
+|host（主系统）
+|运行工具链的平台
+
+|Build host(编译主系统)
+|编译工具链的平台
+|===
+
+编译GNU工具链的三种通常方法是:
+
+. 当这三个系统类型是一样的时候称为本地编译:
++
+----
+./configure && make bootstrap
+----
+
+. 当“build host”和“host”不同时称为通常的交叉编译:
++
+----
+./configure –target-powerpc-eabi && make
+----
+
+. 当“build host”和“host”以及“target”都不同时称为“加拿大交叉编译”。
++
+----
+./configure –build=i386-netbsdelf \
+--host=i686-pc-cygwin \
+--target-powerpc-eabi && make
+----
+
+这个奇怪的方法称为“加拿大交叉编译”，是因为当需要为其命名时，加拿大正好有三个政党。这大多出现在处理预编译工具链时。
+
+上面的例子将会产生一个运行在 i686-pc-cygwin 主系统上（例如一个安装了 cygwin 的 windows 系统）并将会产生嵌入式 powerpc 目标代码。这个工具链在 NetBSD/i386 机器上编译。
+
+需要一个通常的交叉编译器来编译加拿大交叉编译器。
+
+大多数人使用本地编译方式编译软件。通常人们所使用的交叉编译器的 “build host” 和 “host” 是相同的。
+
+主系统的编译器是用于自举交叉编译器的编译器，并且用于编译需要运行在 “build host” 系统上另外的所有主系统工具。
+
+== 特征集
+
+`build.sh` 系统的特征详述如下。别的系统也处理其中一些内容但是并不是所有的内容。
+
+=== 交叉编译NetBSD发行套件
+
+对于想在目标平台（通常是嵌入式系统）上使用 NetBSD，但又想使用不同的主开发系统的开发者，这是一个很大的益处。
+
+这个特征依赖于先前描述的工具链支持。
+
+合适的编译系统包括:
+
+* 当前和先前的 NetBSD 版本
+* 别的 Unix 类系统，例如 Darwin(Mac OS X)，FreeBSD, HP-UX, Linux 和 Solaris。
+* 安装 cygwin 的 Windows
+
+=== 简单
+
+`build.sh` 应当简单易用同时保留足够的灵活性以允许高级用户和开发者来定制他们的编译环境。
+
+NetBSD的志愿者资源是有限的，所以有必要简化编译过程减少支撑负担。
+
+
+=== 只读的源码树
+
+源码树可以只读也可在编译不同目标NetBSD平台的编译间共享。
+
+这允许直接从只读源码目录或是不会导致不必的镜像冲突的源码“镜像”编译。在这种情况下，编译输出写到文件系统的一个单独的可写区内。
+
+除了文件系统上定位源码树和目标树的路径名长度外没有别的限制。
+
+=== 不需要root权限
+
+编译发行套件不需要 root 权限或是别的特殊权限。先前的编译过程要求创建 tar 文件的权限或包含设备的文件系统，属于别的用户的用户，set-ID 文件等等。
+
+大多数别的编译系统要求特殊权限。例如，Debian fakeroot<<ref-fakeroot>> 机制要求主系统支持带 `$LD_PRELOAD` 功能的共享目标库（共享目标库在主程序之后载入，但在程序的共享目标依赖关系之前），并且这中断了下个需求。
+
+=== 避免了不可移植操作系统特征
+
+`build.sh` 之前，创建 NetBSD 引导媒介要求 root 权限来创建一个“回环虚拟节点磁盘设备”（vnd)，安装引导块，在 vnd 上创建文件系统，挂载文件系统，并且创建属于非编译用户的文件系统入口。大多数别的系统仍然用这种方法编译她们的发行媒介。
+
+`build.sh` 不要求主操作系统的特征，例如:虚拟磁盘设备，回环文件系统，`chroot`` 笼子，共享目标/库，或是动态加载模块。
+
+=== 分离的编译工具
+
+build.sh编译 “host” 工具到 `$TOOLDIR` ，一个和主系统本地工具分离的位置。build.sh 使用 `$TOOLDIR` 里的工具来编译 NetBSD系统安装到一个单独的 `$DETDIR` 位置。这解决了当主系统平台的内建工具需要升级来编译一个新源码树时的“先有鸡还是先有蛋”的问题。
+
+旧的技术使用内建工具链有如下弊端:
+
+没有重大的革新，编译主机必需运行相同架构的NetBSD和相似的软件。
+
+内建工具链要求定期升级。
+
+升级内建工具链通常要求处理一些不易自动化的事情。例如，某次 `/usr/share/mk` 需要 make ,另一次 make 需要 `/usr/share/mk` 升级。
+
+=== 对NetBSD源码影响最小
+
+对于存在的 NetBSD 源码和编译基础框架影响最小化。
+
+我们为了使用外来的编译器而改变 NetBSD 源码树。因此主系统本地工具链仅用于编译 NetBSD 主系统工具。
+
+有必要改进 NetBSD 主系统工具的可移植性使其可应用于非 NetBSD 平台。这些改变并不太大。
+
+=== 不需要特别定制的编译器
+
+有个要求是 `build.sh` 对于本地编译和交叉编译都要可用。
+
+这个特征是另一个努力以减少编译 NetBSD 的支持开销，同时保留了我们期望的灵活性。
+
+== 结果
+
+=== 益处
+
+在 NetBSD 1.6 版本发行周期，39 个平台接近于每天编译基本的操作系统发行套件，确保每天都知道所有的编译问题，可由任何人测试的最新编译可用。主要的（37）编译任务在一台由 AMD 和 Wasabi 捐赠的双核 AMD MP2000+ 处理器的机器上执行，alpha 和 sparc64 平台的在 matt Thomas 的 CS20 alpha 机器上编译。
+
+相比于 NetBSD 1.5 版只有 20 个平台有二进制版本；它们全是在相应平台上本地编译的，要求每个平台有个指定的人来编译，从第一个平台到最后一个平台的工作完成和可用，花费了 12 天的时间。
+
+==== 易于使用
+
+新的 `build.sh` 非产简单和易用，但仍然功能强大。任何人都可以在他们所拥有的最快的平台上为大多数平台编译内核，应用程序或是完整的发行版本。
+
+==== 可移植性更好的源码
+
+定义了用于 NetBSD 编译的每个工具。我们知道我们所需要的工具和其应具有的特征。我们必须确保这些工具是可以在其它平台编译和正确运行的可移植程序。
+
+==== 跨平台编译
+
+我们不再要求运行某个特定版本的 NetBSD 来编译。现在支持从 NetBSD 1.5 来编译 NetBSD 1.6，在 Solaris 上编译也可以，还有Linux 等。从 NetBSD 开始那天起就困扰其的源码编译自举问题没有了。
+
+=== 代价
+
+==== 出牙（teething)问题
+
+build.sh花了很长时间来定型，才趋于稳定和可用。另一方面，现在不处理添加新平台支持支持的问题，这是个已经付出的一次性开销。
+
+==== 难于跨平台的软件
+
+一些软件编写时没有考虑到会交叉编译，因此使其很难于交叉编译。不仅仅是软件本身编写的方式，还有软件实际编译方式。很多软件编译过程编译辅助程序产生真实代码，因此这些程序必需既要正确的在你目标平台上工作，又要在本地系统上正确工作，它们必须由“host”系统的编译器编译。自动挂载器（automounter)amd受次影响,因为编译过程假设本地主系统架构和程序所要编译的架构是相同的，导致一个sparc二进制程序在i386上编译产生小尾端的不正确的字节交换数据。
+
+==== CPU尾端和字大小问题
+
+工具链里存在 CPU 尾端和字大小的问题。由于在我们所用的 GCC 版本（2.95.3)里存在bug， NetBSD/alpha 不能从32位主系统上编译，NetBSD/i386 不能从 64 位系统交叉编译。
+
+幸运的是，我们发现 GCC 3.3,NetBSD/alpha 可以在 32 位平台上编译，同时在 NetBSD 2.0 分支之前，GCC 的版本升级到 3.3.x。
+
+
+==== 转换平台的开支
+
+如今，不是所有平台都转换到 build.sh。在 build.sh 框架内，内建工具链并不支持所有的平台（例如，pc532, playstation2)，同时别的平台在 build.sh 集成之前可能没有完整的编译基础框架，并且存在 NetBSD 1.6 版本之前的限制资源。
+
+==== 性能分析
+
+这里有个编译主系统工具的时间开销，但这不能认为可以有效的说明问题。例如，在 AMD XP2500+ 上，各种
+编译 i386 版本的方法花费的时间是:
+
+[cols="2*"]
+|===
+|`./build.sh -U tools`
+|5分6秒
+
+|`./build.sh -U release`
+|1小时28分
+
+|尝试 `make release` ,但是失败了所花费的时间，失败是由于使用两个月前的旧工具，未能升级。
+|大于2小时
+|===
+
+== 实现
+
+`build.sh` 的实现包含了各种元素。
+
+编译过程是用了各种环境变量来控制操作，这包括:
+
+[cols="2*"]
+|===
+|`TOOLDIR`
+|对于给定主系统平台的主系统工具的路径
+
+|`DESTDIR`
+|所要编译的 NetBSD 的路径
+
+|`RELEASEDIR`
+|最终的 NetBSD 版本文件
+|===
+
+=== src/build.sh
+
+`build.sh` 是个用于在任何在 `/bin/sh` 有 POSIX兼容 Bourne shell 的系统上来编译整个 NetBSD 系统的 Bourne shell 脚本。它为用于交叉编译系统的各种主系统工具创建目录（称为 `$TOOLDIR`),把在各种设置参数“封装<<ref-trans-2>>”传给 make ，使用封装的 make 编译主系统工具，并使用主系统工具把系统剩余部分编译送到称为 `$DESTDIR` 的目录下。
+
+`build.sh` 很复杂并可编译整个发行套件，一个特定的内核，或仅是一些工具或是 make 封装，甚至是升级先前安装在 `$DESTDIR` 目录下的系统。
+
+`build.sh` 的操作顺序如下:
+
+. 确认放在 `$MACHINE` 里的目标平台的架构（默认和主系统相同），和放在 `$MACHINE_ARCH` 里的目标机处理器架构。
+. <<ref-trans-3>> 编译一个主系统的二进制的 make 并安装到 `$TOOLDIR/bin/nbmake`。
+. 创建包含环境变量的 make “封装” shell 脚本，设定控制编译和安装什么到 `$TOOLDIR/bin/nbmake-$MACHINE` (这也许是 buld.sh 所要做的最后一个操作）。
+. 使用 `$TOOLDIR/bin` 下可用的二进制程序，编译主系统工具用以产生目标 `$MCAHINE` 的二进制程序并安装到 `$TOOLDIR`。
+
+. 使用 `$TOOLDIR` 下的主系统工具执行其余要求的操作，包括:
+
+* 编译一个 NetBSD 发行套件到 `$DESTDIR`。
+* 为某个特定的 NetBSD 版本编译内核和 `$DESTDIR` 下所有的包到版本目录 `$RELEASEDIR`。
+* 编译一个特定的内核
+* 从 `$DESTDIR` 创建版本的“sets”或是从源码创建源码的“sets”。
+* 从 `$DESTDIR` 升级目录（通常是“/”）。
+
+某些 `$MACHINE` 平台支持多余一个的 `$MACHINE_ARCH` 处理器架构（一个可处于两个尾端模式的处理器或是不止一字大小的处理器认为是不同的处理器架构），并且 `build.sh` 支持编译不同处理器架构的作为不同的版本。
+
+=== src/BUILDING
+
+`build.sh` 的内建文档。
+
+
+=== src/Makefile
+
+这个源码树顶层目录下的 Makefile 包含各种易于编译整个 NetBSD 源码树的目标，包括:
+
+[cols="2*"]
+|===
+|`build``
+|编译整个NetBSD系统，为了确保依次编译所依赖的包。
+
+|`Distribution,buildworld`
+|执行 make build 接着安装安装完整的发行套件到 `$DESTDIR` ,包含 `$DESTDIR/etc` 目录 `$DESTDIR/var` 目录
+
+|`release`
+|执行 make distribution, 接着编译内核，发行媒介，安装“sets”,然后对 `$RELEASEDIR` 目录下的系统打包。
+
+|`installworld`
+|从 `$DESTDIR` 目录下安装发行套件到 `$INSTALLWORLDDIR` (通常是“/”)。
+|===
+
+=== src/share/mk
+
+为了简化编译过程，在目录 `src/share/mk` 目录下，NetBSD 使用了一个 make 的 Makefile 包含文件库（以 **.mk** 为后缀）。这是从4.3BSD Networking/2 和 4.4BSD Lite 继承而来的，在十年里有了很大的改进。
+
+=== src/tools
+
+传统上，BSD 系统是由内建的工具，编译器，包含文件和库编译的。这对于交叉编译来说是不行的，这个框架还修正了在第三节提到的很多别的问题。
+
+`src/tools` 包含制作过程中用以编译各种主系统工具的 make 框架。这些工具由一个 autoconf 然后编译形式兼容的框架所编译，并且使用复用 Makefile 到 NetBSD 源码树的剩余部分以最小化代码复制。
+
+这些主系统工具的源码做过少量修改以使其可编译为 NetBSD（目标平台）程序，主系统工具也是这样。
+
+主系统工具安装到 `$TOOLDIR` ,对于 BSD make， `src/share/mk` 下的 “.include” 框架先于标准版本来选择各种主系统工具。例如，对于i386目标平台 `$CC` 将是 `$TOOLDIR/bin/i386--netbsd-gcc` 而不是 cc。
+
+除了内建版本的 binutils 和 gcc 外，也可以支持使用别的工具链。这对于内建工具链还不支持的目标平台是很有用的。
+
+主系统工具当前包括:
+
+[%hardbreaks]
+----
+as asn1_compile binutils cap_mkdb cat cksum
+compile_et config crunchgen ctags db dbsym
+file gcc gencat groff hexdump install
+installboot ld lex lint lorder m4 makefs
+makewhatis mdsetimage menuc mkcsmapper
+mkdep mkdep mkesdb mklocale mktemp msgc
+mtree pax pwd_mkdb rpcgen su nlabel 
+texinfo tsort uudecode yacc zic
+----
+
+大多数主系统工具安装时都带 “nb” 前缀，以和主系统上类似名字的程序相区别。GNU 工具链程序是例外的，它们已经有了例如`i386—netbsdelf-gcc` 这样的名字了。
+
+=== 元逻辑支持
+
+传统上，install 是由 root 来运行的，以相应的属主和权限安装到 `$DESTDIR`（通常是“/”)的相应目录里。
+
+这阻止了非 root 用户编译整个发行套件，因为很多文件要求特定的权限，例如对 `/usr/bin/su` 设置 set-user-ID。
+
+为了解决这个问题，为了使存在的 `mtree` 工具支持全路径名（对比于上下文相关的想对路径），我们提升了相关文件，并把最终结果称为“元逻辑”记录。一个记录的例子是：
+
+----
+./usr/bin/su type=file mode=04555 \
+uname=root gname=wheel \
+time=1057493599.102665
+----
+
+对于每个给定的编译，都要创建一个元逻辑，对于每个安装路径都有一个“元逻辑”行。元逻辑文件由编译全过程中的各种工具操控和分析。
+
+install 改成可以安装到当前用户的路径里而不需要特殊权限，并取代了相应于元逻辑的要求权限。`src/share/mk` 下的 “.mk” 文件和少量的特定情形的 Makefile 需要修改来利用 install 的这个功能。
+
+pax 修改成可以分析用于要添加到列表的元逻辑，甚至可以为 `$DESTDIR` 下还没创建的设备添加伪入口。这用于制作由非特权用户由元逻辑和 `$DESTDIR` 制作的包含正确的属主和权限的 tar.gz 文件。这个脚本创建用于分析元逻辑的和引用适当的 pax 的“安装集”。
+
+=== makefs
+
+各种平台使用发行媒介要求从ffs文件系统引导。之前，NetBSD 使用“回环虚拟节点磁盘驱动”（vnd），但这在很多别的系统上无法使用，并且挂载和写都要求 root 权限。
+
+添加了 makefs 来从一个目录树创建文件系统映象，也可选元逻辑。从概念上来看这类似于 `mkisofs` －一个可创建 `iso-9660文件系统` 映象的 GPL 程序。
+
+使用 makefs,一个非特权的用户可以创建带有完整设备节点（随后由元逻辑指定）的 ffs 文件系统。
+
+同时 makefs 以一种易于添加别的文件系统支持的方式写就，当前只支持 ffs 文件系统（包含大尾端和小尾端，因为 NetBSD ffs 代码支持对立尾端的 ffs 文件系统，可参考内核的 “FFS_EI” 选项，在应用程序工具里也支持例如 newfs 和 fsck_ffs）.对于例如 iso9660,ext2fs 和 FAT 的支持也在考虑之中，但此时并不是一个高优先级的事情。
+
+ffs 后端的实现重用了一定量的 NetBSD 内核当前的 ffs 实现（在`src/sys/ufs/ffs`)代码，但是坦率的讲，块分配的代码是以类似的方式重新实现的。在这部分做了很多假定，例如块不需要重分配，
+
+因为所有文件和目录（也作为文件）的大小在创建文件系统的时候是已知的。
+
+ffs 在集成到 4.2BSD 之前是以用户程序实现的，在经过 20 多年的内核磨砺，已经和缓冲 cache 以及其他内核子系统紧紧联系在一起，这使它很难以一个单独的程序使用。
+
+=== installboot
+
+大多数平台需要发行媒介上有引导块，这是由 installboot 安装的。之前，每个平台在 `/usr/mdec/installboot` 都有它自己版本的installboot,是作为内核源码的一部分编译的，它严重依赖于内核源码。也要求 root 权限并通常要求内核支持特定的磁盘标识 `ioctl()` 的并只在实际的磁盘设备上工作。
+
+`/usr/sbin/installboot` 是取代机器相关版 installboot 的。它可在文件系统映象上工作，也不需要 root 权限或是内核支持`ioctl()` 的来作那些。尽管不同硬件平台的实际实现显然是不同的，各种平台间的引导块设计因此实现标准化。
+
+NetBSD-1.6 方出的所有平台的二进制版本都使用了这个结构（除了 i386 )。由于它的 installboot 的怪异的实现，因此 i386 是个特例，但是由于为 i386 交叉编译的主机是个双核 i386 机器，它可在本地运行工具。在 NetBSD-current 已经消除了这个问题。
+
+与此相关的是，可以制作在多平台上引导 NetBSD 的光盘。例如，i386,sparc64 和 macppc 可以从相同的磁盘引导，对于别的平台还有广阔的空间。NetBSD-1.6 放出了 39 个平台的伙同源码的二进制版本，装上 4 个CD可引导 9 个平台的。
+
+=== src/etc/postinstall
+
+postinstall 是个脚本，在 NetBSD 放出后有边时，它检验和/或修正配置变更。
+
+postinstall 添加到编译系统来探测，大多数情况下，自动修复，由软件更改造成的配置变化。
+
+Postinstall 支持的测试是:
+
+[cols="2*"]
+|===
+|postinstall
+|`/etc/postinstall` 保持最新
+
+|defaults
+|`/etc/defaults` 保持最新
+
+|mtree
+|`/tec/mtree` 保持最新
+
+|gid
+|`/etc/group` 包含要求的组
+
+|uid
+|`/etc/passwd` 包含要求的用户
+
+|periodic
+|`/etc/{daily,wekkly,monthly,security}` 保持最新
+
+|rc
+|`/etc/rc*` 和 `/etc/rc.d` 保持最新
+
+|ssh
+|ssh 和 sshd 配置升级
+
+|wscons
+|wscons 配置文件升级
+
+|makedev
+|`/dev/MAKEDEV` 保持最新
+
+|postfix
+|`/etc/postfix` 保持最新
+
+|obsolete
+|`obsolete` 文件集
+
+|sendmail
+|sendmail 配置保持最新
+|===
+
+== 未来的工作
+
+=== xsrc
+
+NetBSD 当前不支持交叉编译 “xsrc” (我们对 `X11R6/XFree86 4.x` 的复制），但最终会修正这个。XFree86 4.3 自己添加了交叉编译支持。为了和我我们的编译系统集成，我们也许会对 X11 实现自己的交叉编译方法。XFree86 的交叉编译方法不能满足我们的所有需求，特别是移除对 root 权限的要求。
+
+=== pkgsrc
+
+_“pkgsrc”_ (NetBSD 的包管理系统）不能交叉编译。一小部分特别，通常很小的包很易于交叉编译，但大部分需要大量的努力才信。
+
+有两个解决这个问题简易方法的建议:
+
+. Krister Walfridsson 建议在模拟器里本地编译这些包，使用最优化的方法，例如直模拟用户模式，并找准系统需求和在本地运行（手动调整参数）。
++
+一个增强的版本是探测模拟的程序是否是 gcc（打个比方），在这种情况下调用系统本地的交叉编译器。
++
+初步的进展看起来是很有前景的，使用 ARM 模拟器，编译速度是在 ARM 上本地编译的6倍。
++
+这个建议会被用于解决 6.1 节所提出的 “xsrc” 的问题。
+
+. 使用distcc<<ref-distcc>>这样的工具来使用远程系统（更快的）分布式编译 C 或 C++ 代码，甚至是可用和你当前系统的架构不同<<ref-trans-4>>，只要有合适的编译器可用。这仍然要求本地系统参与部分编译过程［译者注5］。
+
+== 结论
+
+build.sh 对于各种问题是个很好的解决办法。现在在运行旧版本的 NetBSD 上很容易编译着整个 NetBSD 发行套件，甚至可在别的系统例如 Darwin/MacOSX, FreeBSD, Linux 和 Solaris 上编译。
+
+总体说来，NetBSD 里使用 build.sh 的支持问题比以前少多了，特别是考虑到现在支持的平台数。过去，在完成剩余的编译前，以一个特定的顺序（经常改变的）升级各种内建的工具，包含文件和库。
+
+现在，一个完整的编译过程不会对运行心痛造成任何影响，当完成一个编译时候，升级也很容易成行。
+
+作者通常在我们(很快的）alpha，i386, macppc 和 sparc64 系统上使用 build.sh 来为例如 alpha,i386,mappc,pmax,shark,sparc,sparc64 和 vax 来交叉编译整个发行版，以一个非特权用户使用只读源码。
+
+//[appendix]
+== 鸣谢
+
+Todd Vierling 写了最初版本的 build.sh，并设定了 `src/tools` 的框架。
+
+Jason Thorpe 做了很多工具链方面的工作，并且组织了 build.sh 的框架结构。
+
+Erik Berls 写了并维护了用于 NetBSD 版本引擎机器的用于在多个编译机器上为多个目标平台自动编译多个版本分支发行套件的autobuild 脚本。
+
+Wasabi 系统有限公司。为这个从事这个项目各种开发工作的很多人员付薪水。
+
+自由软件基金会提供了了 GNU 工具链，它的移植性是相当棒并且是交叉编译友好的。
+
+//[bibliography]
+== 参考
+
+
+* [[[ref-netbsd,1]]] 欢迎到NetBSD项目, http://www.NetBSD.org
+* [[[ref-autobuild,2]]] NetBSD项目Autobuild［用于NetBSD 1.6］ http://releng.NetBSD.org/ab/B_netbsd-1-6
+* [[[ref-porting,3]]] 可移植性和硬件支持平台
+    http://www.NetBSD.org/Goals/portability.html
+* [[[ref-porting-amd64,4]]] Frank vander Linden,移植NetBSD到AMD x86-64:操作系统移植性的实例研究，BSDCon 2002
+    http://www.usenix.org/events/bsdcon0...en/linden_html
+* [[[ref-dma,5]]] Jason R.Thorpe,用于NetBSD的一个机器不相关的DMA框架，Usenix 1998年年刊技术参考
+    http://www.usenix.org/publications/l.../thorpe.dma.ps
+* [[[ref-gcc,6]]] 欢迎到GCC主页
+    http://gcc.gnu.org
+* [[[ref-fakeroot,7]]] 包:fakeroot 0.4.4-9.2
+    http://packages.debian.org/stable/utils/fakeroot.html
+* [[[ref-distcc,8]]] distcc:快速，自由的分布式C/C++编译器
+    http://distcc.samba.org
+* [[[ref-trans-1,9]]] 关于交叉编译的原理和方法可以参见LFS的CLFS子项目，常见的两种方法是clfs-1.x,clfs-sysroot，一些原理分析可参见linuxsir.org的LFS讨论区一些精华帖。还有一个材料是Cygnus的文档《The GNU configure and build system》，对于交叉编译的原理有讲解。还有一些就不一一列出，注释只是提示性的，对交叉编译不了解的也许会有帮助。
+* [[[ref-trans-2,10]]] 这里的意思应该是把make参数定义成一个变量就不用每次都指定了，封装的目的是为了使用正确的参数,一般是个简单的shell脚本，例如 Gentoo distcc 交叉编译文档里 gcc 封装就是指定使用交叉编译器而不是本地编译器，可参见 Gentoo 文档库，如果不想看英文的，可参见我翻译的Gentoo distcc 文档和 distcc 交叉编译文档。
+* [[[ref-trans-3,11]]] build.sh 每次总是首先重新编译 nbmake。这在 NetBSD FAQ 的《Tracking NetBSD-current》这篇文章的最后有解释:
+** 甚至在运行./build.sh tools和使用-u标识或是在/etc/ma.conf里指定TOOLDIR，build.sh总是重新编译nbmake。这是正常的，原因可在build.sh本身里找到，在rebuildmake函数里:
+** 注意如果TOOLDIR已经在"mk.conf"里设定好了，我们并不会倾向于从其中读取TOOLDIR，因为它可能包含make变量扩展和别的仅在我们有个可工作的${toolprefix}make后才可用的内容。所以这个逻辑只在用户在环境变量里设置TOOLDIR ，或是对build.sh使用-T选现。
++
+所以，如果你不想重编译nbmake,你需要使用-T指定工具目录或是设置TOOLDIR环境变量。
+* [[[ref-trans-4,12]]] 如果不想看英文的，可以参见我翻译的Gentoo distcc/distcc交叉编译文档。
+* [[[ref-trans-5,13]]] 你可以不用你的机器而把编译任务全分配到别的你用于编译的机器上。

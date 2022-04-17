@@ -1,0 +1,172 @@
+[[netbsd.internals]]
+= NetBSD 内幕
+韩鹏飞（翻译） <pengphei@qq.com>
+:Revision: 0
+:toc:
+:icons: font
+:numbered:
+:lang: zh-CN
+:website: https://www.netbsd.org/docs/internals/en/index.html
+:imagesdir: images/internals
+
+ifdef::env-github[]
+//Admonitions
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[[netbsd.internals.purpose]]
+== 本书目的
+
+本书主要讲述 NetBSD 操作系统内部机制。其主要的想法是为希望为 NetBSD 开发扩展或者优化已有代码的开发者提供全面的文档。同时，也就无需对系统代码进行逆向工程来了解它的工作机制。
+
+本书仍然有许多工作需要完成：一些章节还未完成，而且还有些未开始。这些已经在计划中，但仍为实施的部分，已经属于本书的一部分，但是已经清晰的使用 XXX 占位标注为不完整。
+
+本书目前由 NetBSD www 组织维护(<www@NetBSD.org>)。修正，建议，以及扩展内容可以发送到该邮箱。
+
+[[netbsd.internals.memory-management]]
+== 内存管理
+
+XXX: 本章非常不完善。它目前包含部分支持支持文档用于 <<netbsd.internals.file-system-internals>>。
+
+=== UVM 虚拟内存管理器
+
+UVM 是 NetBSD 的虚拟内存管理器
+
+
+=== 管理内存使用
+
+NetBSD 内核提供的 malloc(9) 和 free(9) 函数与它们用户层中对应接口非常相似。它们用于分配和释放相应使用的内存。
+
+==== 分配类型
+
+分配类型用于将不同分配块组织到逻辑集合，便于内核以一种更高效的方式对它们进行管理。
+
+一种分配类型可以通过静态或者动态方式定义。在构建时，当它们嵌入的代码段和内核链接在一起时，就属于**静态定义**；如果它们属于一个独立模块的一部分，就是**动态定义**。
+
+对于静态声明，提供了 MALLOC_DEFINE(9) 宏，用于源文件的全局处理。如下：
+
+[source, c] 
+----
+MALLOC_DEFINE(	type,	 
+ 	short_desc,	 
+ 	long_desc);	 
+struct malloc_type *type;
+const char *short_desc;
+const char *long_desc;
+----
+
+第一个参数为需要定义的分配类型名称；不要为上面的 type 名称所困惑， 因为它属于一个内部细节，你不需要了解。分配类型通常以大写字母命名，前缀为 **M_** 。一些示例包含 **M_TEMP** 用于临时数据，**M_SOFTINTR** 用于软中断结构体等。
+
+第二和第三个参数是描述类型的字符串；前者是一个短描述，后者是一个长描述。
+
+对于动态声明，你必须首先在源文件中定义一个静态分配。然后， https://man.netbsd.org/NetBSD-9.2/i386/malloc_type_attach.9[malloc_type_attach(9)] 和 https://man.netbsd.org/NetBSD-9.2/i386/malloc_type_detach.9[malloc_type_detach(9)] 函数用于通知内核该类型的加载和移除。这通常在模块初始化和终止例程中完成。
+
+[[netbsd.internals.file-system-internals]]
+== 文件系统内部
+
+=== 架构概览
+
+=== vnode 接口概览
+
+=== VFS 接口概览
+
+=== 文件系统概览
+
+=== 初始化和清理
+
+=== 挂载和卸载
+
+=== 文件系统统计
+
+=== vnode 管理
+
+=== 根 vnode
+
+=== 路径名解析步骤
+
+=== 文件管理
+
+=== 符号链接管理
+
+=== 目录管理
+
+=== 特殊节点
+
+=== NFS 支持
+
+=== 一步一步编写文件系统
+
+
+[[netbsd.internals.processes-and-threads]]
+== 进程和线程
+
+=== 进程启动
+
+
+=== 陷入和系统调用
+
+=== 进程和线程创建
+
+=== 进程和线程终止
+
+=== 信号分发
+
+=== 线程调度
+
+[[netbsd.internals.networking]]
+== 网络
+
+=== 路由
+
+=== 套接字
+
+=== 缓冲区
+
+=== IP 层
+
+=== UDP
+
+=== TCP
+
+[[netbsd.internals.networking-services]]
+== 网络服务
+
+构建在核心网络功能之上的服务在本章描述。它们包括，如 IEEE802.11 子系统，以及 IPsec 子系统。同时，对网络伪装设备和它们的操作也在此讲述。
+
+=== IEEE 802.11
+
+`net80211` 层提供了无线网卡需要的功能。它位于 `sys/net80211`。这里的代码原本在 FreeBSD 和 NetBSD 之间共享，并且 NetBSD 专有的部分尽量保持在 `ieee80211_netbsd.c` 中（同样，在 FreeBSD 中也存在 `ieee80211_freebsd.c` 文件）。
+
+`ieee80211` 接口在 NetBSD 操作手册第 9 章中有讲解。本章将不会重复已经在那里讲述过的内容。
+
+`net80211` 层的主要功能如下：
+
+* 基于 MAC 地址的权限控制
+* 加密
+* 输入输出帧处理
+* 节点管理
+* 用于 bpf/tcpdump 无线框架
+* 速率自适应
+* 附属例程，如内核诊断输出，转换功能和资源管理
+
+`ieee80211` 层本身的定位于设备驱动和以太网模块之间，虽然对于传输来说，它直接由设备驱动调用，而不是直接通过它传输控制。对于输入，`ieee80211` 层从设备驱动接收包，
+
+=== IPSec
+
+=== 网络伪装设备
+
+=== 包过滤器
+
+== 附录 A. 致谢
+
+== 附录 B. 参考文档
+
+[McKusick] Marshall Kirk McKusick. Keith Bostic. Michael J. Karels. John S. Quarterman. Copyright © 1996 Addison-Wesley Longman, Inc.. 0201549794. Addison-Wesley Professional.
+The Design and Implementation of the 4.4 BSD Operating System.
+
+[Goodheart] Berny Goodheart. James Cox. Michael J. Karels. Copyright © 1994 Prentice Hall. Prentice Hall.
+The Magic Garden Explained: The Internals of UNIX System V Release 4.

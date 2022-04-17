@@ -1,0 +1,48 @@
+## ----------------------------
+## Doc Config File for DAPS
+## DAPS User Guide
+## ----------------------------
+##
+## Basics
+
+MAIN=MAIN-netbsd-quick-install.adoc
+ADOC_POST=yes
+ADOC_TYPE=article
+ADOC_IMG_DIR=adoc/images
+
+
+# DO NOT SPECIFY A STYLEROOT REQUIRING A SUSE-XSL-STYLESHEET INSTALLATION
+# SINCE THIS WILL FAIL WITH A DAPS CHECKOUT OR BUILD ON OTHER DISTRIBUTIONS
+#
+# IT WILL ALSO CAUSE THE TRAVIS TEST BUILDS TO FAIL
+#
+# If needed, specify the following on the command line:
+# --styleroot="/usr/share/xml/docbook/stylesheet/daps2013"
+STYLEROOT="/usr/share/xml/docbook/stylesheet/suse2021-ns"
+
+#--------------------- XSLT Parameters------------------------
+#
+# show acronyms in the glossary, so as not to confuse the user
+#XSLTPARAM="--stringparam glossentry.show.acronym=primary"
+
+# Lists
+XSLTPARAM+="--param variablelist.as.blocks=1"
+
+# Pagination and General Styles
+#XSLTPARAM+="--param body.start.indent=0 --param double.sided=0 --param header.rule=0 --param footer.rule=0 --stringparam paper.type=A4"
+
+# Font Families
+XSLTPARAM+="--stringparam body.font.family="'Charis SIL', CharisSIL, 'WenQuanYi Micro Hei', serif""
+XSLTPARAM+="--stringparam sans.font.family="'WenQuanYi Micro Hei', 'Open Sans', OpenSans, sans-serif""
+XSLTPARAM+="--stringparam monospace.font.family="'DejaVu Sans Mono', DejaVuSansMono, 'WenQuanYi Micro Hei Mono', monospace""
+XSLTPARAM+="--stringparam symbol.font.family="'WenQuanYi Micro Hei Mono', WenQuanYiMicroHeiMono, 'DejaVu Sans Mono', DejaVuSansMono, KoreanSans, UnBatang, 'Un Batang', monospace""
+
+# when using the suse2013 stylesheets, set a link to the DAPS
+# homepage at the top of the page
+# set a homepage for HTML builds
+XSLTPARAM+="--param suse.content=2"
+XSLTPARAM+="--stringparam homepage=https://www.netbsd.org"
+XSLTPARAM+="--stringparam suse.doc.url=https://www.netbsd.org"
+#XSLTPARAM+="--stringparam daps.header.logo=static/images/autobio-logo.png"
+#XSLTPARAM+="--stringparam company.address="安图实验仪器(郑州)有限公司, 郑州经济技术开发区第十五大街199号""
+

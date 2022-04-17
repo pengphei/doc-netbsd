@@ -1,0 +1,444 @@
+[[netbsd.install]]
+= NetBSD快速安装配置
+韩鹏飞（整理） <pengphei@qq.com>
+:Revision: 0
+:toc:
+:icons: font
+:numbered:
+:lang: zh-CN
+:website: https://www.netbsd.org/docs/internals/en/index.html
+:imagesdir: images/install
+
+ifdef::env-github[]
+//Admonitions
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[[netbsd.install.intro]]
+== NetBSD简介
+
+NetBSD 是一个免费的，具有高度移植性的 UNIX-like 操作系统，是现行可移植平台最多的操作系统，可以在许多平台上执行，从 64bit alpha 服务器到手持设备和嵌入式设备。NetBSD 计划的口号是：“Of course it runs NetBSD”。它设计简洁,代码规范，拥有众多先进特性，使得它在业界和学术界广受好评。由于简洁的设计和先进的特征，使得它在生产和研究方面，都有卓越的表现，而且它也有受使用者支持的完整的源代码。许多程序都可以很容易地通过NetBSD Packages Collection获得。
+
+* 官方站点： http://www.netbsd.org/
+* 官方下载： http://www.netbsd.org/releases/
+* 官方手册： http://www.netbsd.org/docs/guide/en/index.html
+
+[[netbsd.install.feature]]
+== 基本特色
+
+* 可移植性（超过 20 种平台被支持）
+* 程序代码的品质与正确度高
+* 稳定性
+* 研究与革新
+
+[[netbsd.install.steps]]
+== 安装
+
+最新的NetBSD安装镜像可从以下站点获得： http://cdn.netbsd.org/pub/NetBSD/NetBSD-9.0/images/ 找到自己对应的平台即可。
+
+或者到清华大学开源软件镜像站获得： https://mirrors.tuna.tsinghua.edu.cn/NetBSD/
+
+NetBSD安装过程可参照： https://www.gobsd.org/nb/index.html#chap-exinst 这里不再赘述。
+
+[[netbsd.install.xfce4]]
+== 配置NetBSD桌面环境（Xfce4）
+
+=== 全局网络设置
+
+可以在 `/etc/rc.conf` 里面，然后添加以下几行：
+
+----
+auto_ifconfig=YES  # 为了开机可以自动设定网卡
+hostname=NetBSD    # 主机名
+dhclient=YES       # DHCP
+sshd=YES
+----
+
+如果你使用静态IP，如下 `tlp0` 就是你的网卡。
+
+----
+# ifconfig -l
+tlp0 lo0
+----
+ 
+在 `/etc/rc.conf` 中添加：
+
+----
+auto_ifconfig=YES   #网卡自动启动
+ifconfig_tlp0="inet 192.168.0.123 netmask 255.255.255.0"    #IP地址和子网掩码
+defaultroute="192.168.0.1"  #默认网关
+----
+
+同时在 `/etc/resolv.conf` 中添加 DNS 服务器地址：
+
+----
+nameserver 202.106.0.20   #DNS服务器地址
+nameserver 202.106.196.115
+----
+
+设置好以后，`reboot` 生效。
+
+=== 设定时间
+
+装完后发现系统时间总差8小时，即使你已经指定Asia/Chongqing时间。查看date设置：
+
+----
+＃ date --help
+date: unknown option -- -
+usage: date [-ajnu] [-d date] [-r seconds] [+format] [[[[[[CC]yy]mm]dd]HH]MM[.SS]]
+----
+
+----
+# date 
+Sun Sep 18 02:48:08 CTS 2011
+# date 201109181048
+$ date
+Sun Sep 18 10:48:19 CST 2011
+----
+
+=== 设定ls为彩色
+
+安装gnuls
+
+----
+# pkg_add -v gnuls
+----
+
+然后在用户目录下修改 `.profile` 文件，增加一行：
+
+----
+alias ls="gnuls --color=always"
+alias ls='gls --color=auto -la'
+----
+
+=== pkg_add方式安装
+
+. 设定 NetBSD 的 pkg_add 抓包地址
++
+由于 pkgsrc 安装软件包编译时间漫长，推荐第一次安装软件包使用pkg_add 方式，可按照如下方式设定 pkg_add 抓包地址(root身份)，在 `.profile` 中添加环境变量：
++
+----
+export PKG_PATH=ftp://ftp7.jp.netbsd.org/pub/pkgsrc/packages/NetBSD/amd64/8.0/All/
+export PKG_PATH=ftp://ftp3.de.netbsd.org/pub/pkgsrc/packages/NetBSD/$arch/amd64/All/
+----
+
+. 安装 `pkgfind，pkgin`
+
+`pkgfind` 是一个很方便的包管理工具，可以通过 `pkgfind+关键字` 来查找指定的软件包，而 `pkgin`` 则类似 Linux 下面的包管理器，可以用来安装，升级预编译包，并自动解决依赖关系。有关 `pkgin` 的具体用法，请自己用 man 查看。
+
+终端输入如下命令
+
+----
+# pkg_add -v pkgfind
+# pkg_add -v pkgin
+----
+
+使用 `pkgin` 需要设定预编译包地址，配置文件在 `/usr/pkg/etc/pkgin/repositories.conf` ，配置文件加入如下行：
+
+----
+ftp://ftp7.jp.netbsd.org/pub/pkgsrc/packages/NetBSD/$arch/8.0/All/
+ftp://ftp3.de.netbsd.org/pub/pkgsrc/packages/NetBSD/$arch/amd64/All/
+----
+
+然后运行下面命令：
+
+----
+# pkgin update
+----
+
+pkgin具体用法：
+
+[cols="2*"]
+|===
+|`pkgin update` 
+|创建 packages 数据
+
+|`pkgin install`
+|安装 packages
+
+|`pkgin remove` 
+|删除
+
+|`pkgin full-upgrade` 
+|升级
+
+|`pkgin clean`
+|清除packages缓存
+
+|`pkgin search` 
+|搜索
+|===
+
+=== Xorg.conf 配置
+
+显示分辨率配置：
+
+----
+Section "Monitor"
+        [...]
+        HorizSync    31.0 - 80.0
+        VertRefresh  56.0 - 75.0
+        Modeline     "1600x900@60"     97.75   1600 1668 1700 1760    900  903  908  926 +hsync -vsync
+EndSection
+----
+
+----
+Section "Screen"
+        [...]
+        DefaultDepth 24
+        SubSection "Display"
+                [...]
+                Depth     24
+                Modes   "1600x900@60"
+        EndSubSection
+EndSection
+----
+
+=== 安装 Xfce4 桌面环境
+
+有了 `pkgin` ，安装软件包就方便得多，可用如下命令安装 Xfce4 桌面环境以及 firefox 浏览器等：
+
+----
+# useradd -m -G wheel leon #新增一个用户，并将其加到wheel组
+# passwd leon  #设置密码
+
+# pkgin install sudo
+# visudo
+leon ALL=(ALL) ALL
+----
+
+修改好保存的时候出现问题了，visudo 发现语法错误。
+原因是visudo默认配置文件最后一行#include 写错了，可能作者忘了打空格了，改成 # include 就OK了。
+
+----
+# pkgin install xfce4 gdm firefox zile wget emacs-nox11-25.1 dejavu-ttf inconsolata-ttf
+----
+
+安装完毕以后，根据提示，需要把 `/usr/pkg/share/examples/rc.d` 下面的famd、gdm，hal和dbus 脚本复制到 `/etc/rc.d` 下面，并在 `/etc/rc.conf` 加入如下内容：
+
+----
+famd=YES
+rpcbind=YES
+dbus=YES
+hal=YES
+gdm=YES
+----
+
+另外，还要在 `~/.xinitrc` 加入：
+
+----
+exec xfce4-session
+----
+
+pkgin 的缓存文件在 `/var/db/pkgin/cache/` 。
+
+这里是我缓存文件的目录，可以先用 `wget` 下载好再统一安装。这样更省时间。
+
+文泉驿微米黑显示效果很不错，cp至 `/usr/X11R7/lib/X11/fonts/wqy/` ，然后在那个文件夹下 `ttmkfdir` 。
+
+查看已安装软件：
+
+----
+# pkgin ug
+
+calculating dependencies for emacs-23.2nb3...
+calculating dependencies for gimp-2.6.11nb2...
+calculating dependencies for firefox-3.6.13...
+calculating dependencies for dejavu-ttf-2.32...
+calculating dependencies for ibus-table-chinese-1.3.0.20101206...
+calculating dependencies for xfce4-4.6.1nb6...
+calculating dependencies for ibus-1.3.9...
+calculating dependencies for hal-0.5.14nb1...
+calculating dependencies for less-418...
+calculating dependencies for wget-1.12nb1...
+calculating dependencies for pkgin-0.3.3.4...
+calculating dependencies for pkgfind-20050804...
+calculating dependencies for zile-2.3.17...
+calculating dependencies for sudo-1.7.4p5...
+calculating dependencies for perl-5.12.2nb1...
+nothing to do.
+----
+
+=== Gnome2.32
+
+----
+sudo pkgin in gnome-desktop gnome-panel gnome-session gnome-media gnome-applets gnome-system-monitor gnome-terminal gnome-themes gnome-volume-manager gnome-device-manage gnome-volume-manage nautilus gnome-control-cente
+----
+
+=== 安装ibus输入法
+
+终端输入以下命令安装ibus拼音输入法：
+
+----
+# pkgin install ibus ibus-pinyin ibus-table-chinese
+----
+
+安装完后在，`~/.xinitrc` 加入如下内容：
+
+---- 
+export XMODIFIERS=@im=ibus
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+ibus-daemon -d -r -x
+----
+
+=== 设置中文环境
+
+在 `~/profile` 添加如下内容设置中文环境：
+
+----
+export LANG=zh_CN.UTF-8
+export LC_CTYPE=zh_CN.UTF-8
+export LC_ALL=zh_CN.UTF-8
+----
+
+=== 安装中文字体
+
+到文泉驿官方网站下载字体文件包 http://sourceforge.net/projects/wqy/files/
+
+解压后将字体复制到
+
+----
+# mv wqy-bitmapfont /usr/X11R7/lib/X11/fonts/
+# cd /usr/X11R7/lib/X11/fonts/wqy-bitmapfont/
+# fc-cache -f -v
+# mkfontscale .
+# mkfontdir
+----
+
+=== 挂载光驱
+
+----
+# dmesg | more
+# dmesg | grep ^cd
+# mkdir /media/cdrom
+# mount -t cd9660 -o ro /dev/cd0d /media/cdrom
+----
+
+然后修改 `/etc/fstab` 文件，增加一行，使以后自动挂载:
+
+----
+/dev/cd0d /media/cdrom cd9660 ro,noauto 0 0
+----
+
+=== 安装 pkgsrc
+
+==== 使用 pkgsrc 包来安装
+
+如果你使用 pkgsrc 包来安装。到如下地址下载 ftp://ftp.cn.NetBSD.org/pub/NetBSD/packages/pkgsrc.tar.gz[pkgsrc.tar.gz]，跟freebsd 的 ports 一样。只是名字不同，下载完后用：
+
+----
+# tar -zxvf pkgsrc.tar.gz -C /usr
+----
+
+把目录树解压到 `/usr` 下面，以后要装什么软件自己到 `/usr/pkgsrc` 目录里找。比如要装 zile 。
+
+----
+# cd /usr/pkgsrc/editors/zile
+# make install clean
+----
+
+==== 通过匿名的 CVS 安装
+
+第一次提取(全部)pkgsrc, 你首先需要设置一些环境变量。编辑 /etc/profile 或用户目录的 .profile 文件加入:
+
+----
+# set CVS remote shell command
+CVS_RSH=ssh
+export CVS_RSH
+----
+
+默认情况下 CVS 不会按照用户希望的运行。但是有一个简单的方式是在你的home目录下创建一个 `.cvsrc` 文件，将下面几行保存在里面，这个文件可以节省你的时间和减少你的 bug 提交, 所以我们强烈推荐你这样做。你可以在 CVS 的文档中找到有关这个文件的解释。
+
+----
+# recommended CVS configuration file from the pkgsrc guide
+cvs -q -z2
+checkout -P
+update -dP
+diff -upN
+rdiff -u
+release -d
+----
+
+第一次获取特定的 pkgsrc 稳定分支, 运行:
+
+----
+$ cd /usr &&  sudo env CVS_RSH=ssh cvs -q -z2 -d anoncvs@anoncvs.NetBSD.org:/cvsroot checkout -P pkgsrc
+----
+
+不想用环境变量 `CVS_RSH`` 设置，也可用这行：
+
+----
+$ cd /usr && sudo cvs -q -z2 -d anoncvs@anoncvs.NetBSD.org:/cvsroot checkout -P pkgsrc
+----
+
+这将在你的 `/usr` 目录下创建一个 `pkgsrc/` 目录，并且所有的package源代码将被储存在 `/usr/pkgsrc/` 目录下。
+
+==== 通过CVS更新
+
+要通过 CVS 更新 pkgsrc, 请确保环境变量 `CVS_RSH` 如上面的设置。然后, 进入目录 pkgsrc 运行 cvs:
+
+----
+$ cd /usr/pkgsrc && sudo env CVS_RSH=ssh cvs up -dP
+----
+
+不用环境变量 `CVS_RSH` 的设置：
+
+----
+$ cd /usr/pkgsrc && sudo cvs update -dP
+----
+
+. 用 wget 作为 pkgsrc 默认下载工具
++
+编辑 `/etc/mk.conf`, 加入
++
+----
+FETCH_CMD=wget
+FETCH_BEFORE_ARGS=--passive-ftp
+FETCH_RESUME_ARGS=-c
+FETCH_OUTPUT_ARGS=-o
+或者
+/usr/pkg/bin/wget -cT 10
+----
+
+. 安装pkglint
++
+pkglint 可以算是 NetBSD 的更新工具，可以对比 pkgsrc 和已安装的软件包列表，并且列出有更新版本的软件包，安装方法如下：
++
+----
+# pkgin install pkglint
+----
++
+使用方法:
++
+----
+lintpkgsrc -i 
+----
++
+会出现类似如下内容：
++
+----
+gnome-terminal Version mismatch:"2.30.2" VS "2.32.2"
+----
++
+这就表示 `gnome-terminal` 这个包有更新版本，可以用 `pkgfind` 找到这个包的路径，然后 cd 到那个路径，并使用 `make replace` 进行更新。
+
+=== 安装FORTH
+
+在 NetBSD 下可安装的 FORTH 软件:
+
+----
+edu$ sudo pkgin search forth
+ficl-4.1.0           Forth Inspired Command Language
+gforth-0.7.0nb2 =    Fast interpreter for the Forth language
+pfe-0.33.71nb1       Portable FORTH Environment
+pforth-27            Portable ANS-like Forth
+ 
+=: package is installed and up-to-date
+<: package is installed but newer version is available
+>: installed package has a greater version than available package
+----
